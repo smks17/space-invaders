@@ -53,3 +53,8 @@ target_link_libraries(${PROJECT_NAME}
     ${OPENGL_INCLUDE_DIR}
     ThirdParty
 )
+
+add_custom_target(copy_resources
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/resources ${CMAKE_CURRENT_BINARY_DIR}/resources
+)
+add_dependencies(${PROJECT_NAME} copy_resources)
