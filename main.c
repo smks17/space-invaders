@@ -51,6 +51,9 @@ GLFWwindow* create_window()
 }
 
 
+void frame_buffer_callback(GLFWwindow* window, int width, int height) { glViewport(0, 0, width, height); }
+
+
 const char *read_entire_file(const char* filename)
 {
     FILE *file;
@@ -147,6 +150,11 @@ typedef struct {
         float data[16];
 } Matrix4;
 
+typedef struct {
+    float x, y, z;
+} Point;
+
+
 static const Matrix4 IDENTITY_MATRIX = {{
         1, 0, 0, 0,
         0, 1, 0, 0,
@@ -167,12 +175,12 @@ const Matrix4 multiply_matrix4(Matrix4* mat1, Matrix4* m2)
     return out;
 }
 
-void translate(Matrix4* m, float x, float y, float z)
+void translate(Matrix4* m, Point vector)
 {
         Matrix4 translation = IDENTITY_MATRIX;
-        translation.data[12] = x;
-        translation.data[13] = y;
-        translation.data[14] = z;
+        translation.data[12] = vector.x;
+        translation.data[13] = vector.y;
+        translation.data[14] = vector.z;
         memcpy(m->data, multiply_matrix4(m, &translation).data, sizeof(m->data));
 }
 
@@ -185,8 +193,9 @@ typedef struct {
     unsigned int shader;
     unsigned int texture;
     size_t n_component;  // number of component to draw
-
-    float rel_position_x, rel_position_y;  // relativ positions (-1,1)
+    Point initialize_position;
+    Point initialize_size;
+    Point rel_position;  // relativ positions (-1,1)
 } Object;
 
 
@@ -243,16 +252,10 @@ Object* create_object(float *vertices, size_t n_vertices, float *texture_coords,
     /* glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); */
     glBindVertexArray(0);
 
-    obj->rel_position_x = 0;
-    obj->rel_position_y = 0;
+    obj->rel_position = (Point){0, 0, 0};
 
     return obj;
 }
-
-
-typedef struct {
-    float x, y, z;
-} Point;
 
 
 typedef struct {
@@ -285,8 +288,13 @@ Object* create_rectangle_object(Rectangle rectangle, const char *texture_filenam
         0, 2, 3
     };
 
-    return create_object(vertices, 4, texture_coords, indices, 6,
-                         texture_filename, vertex_shader_filename, fragment_shader_filename);
+    Object *obj = create_object(vertices, 4, texture_coords, indices, 6,
+                                texture_filename, vertex_shader_filename, fragment_shader_filename);
+    if (obj != NULL) {
+        obj->initialize_position = center;
+        obj->initialize_size     = (Point){rectangle.width, rectangle.height, 0};
+    }
+    return obj;
 }
 
 
@@ -317,18 +325,34 @@ void check_object_moving(GLFWwindow* window, Object *obj)
     // if(glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
     //     glfwSetWindowShouldClose(window, true);
     // }
-    if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-        if (obj->rel_position_x < 1.0f) obj->rel_position_x += SPEED;
+    if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        if (obj->rel_position.y + obj->initialize_position.y > (-1.0f + (obj->initialize_size.y / 2)))
+            obj->rel_position.y -= SPEED;
     }
-    else if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-        if (obj->rel_position_x > -1.0f) obj->rel_position_x -= SPEED;
-    }
-    else if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        if (obj->rel_position_y > -1.0f) obj->rel_position_y -= SPEED;
+    else if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        if (obj->rel_position.y + obj->initialize_position.y < (1.0f - (obj->initialize_size.y / 2)))
+            obj->rel_position.y += SPEED;
     }
     else if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        if (obj->rel_position_y < 1.0f) obj->rel_position_y += SPEED;
+        if (obj->rel_position.x + obj->initialize_position.x < (1.0f - (obj->initialize_size.x / 2)))
+            obj->rel_position.x += SPEED;
     }
+    else if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (obj->rel_position.x + obj->initialize_position.x > (-1.0f + (obj->initialize_size.x / 2)))
+            obj->rel_position.x -= SPEED;
+    }
+}
+
+
+void move_object(Object *obj)
+{
+    Matrix4 transform = IDENTITY_MATRIX;
+    translate(&transform, obj->rel_position);
+
+    glUseProgram(obj->shader);
+    unsigned int transform_loc = glGetUniformLocation(obj->shader, "transform");
+    glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
+    draw_object(obj);
 }
 
 
@@ -344,6 +368,8 @@ int main ()
         fprintf(stderr, "Failed to initialize GLAD\n");
         return -1;
     }
+
+    glfwSetFramebufferSizeCallback(window, frame_buffer_callback);
 
     Object *player = create_rectangle_object((Rectangle) {
         .position = {0.0f, -0.8f, 0.0f},
@@ -367,13 +393,7 @@ int main ()
         glClearColor(0.18f, 0.18f, 0.18f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        Matrix4 transform = IDENTITY_MATRIX;
-        translate(&transform, player->rel_position_y, player->rel_position_x, 0.0f);
-
-        glUseProgram(player->shader);
-        unsigned int transform_loc = glGetUniformLocation(player->shader, "transform");
-        glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
-        draw_object(player);
+        move_object(player);
 
         glUseProgram(enemy->shader);
         draw_object(enemy);
