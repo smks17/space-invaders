@@ -371,6 +371,9 @@ int main ()
 
     glfwSetFramebufferSizeCallback(window, frame_buffer_callback);
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     Object *player = create_rectangle_object((Rectangle) {
         .position = {0.0f, -0.8f, 0.0f},
         .height = 0.15f,
