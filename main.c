@@ -250,6 +250,46 @@ Object* create_object(float *vertices, size_t n_vertices, float *texture_coords,
 }
 
 
+typedef struct {
+    float x, y, z;
+} Point;
+
+
+typedef struct {
+    Point position;  // center position (not edge position)
+    float height, width;
+} Rectangle;
+
+
+Object* create_rectangle_object(Rectangle rectangle, const char *texture_filename,
+                      const char *vertex_shader_filename, const char *fragment_shader_filename)
+{
+    const Point center     = rectangle.position;
+    const float rel_height = rectangle.height / 2;
+    const float rel_width  = rectangle.width  / 2;
+    float vertices[] = {
+        center.x+rel_width, center.y+rel_height, 0,  // right up
+        center.x+rel_width, center.y-rel_height, 0,  // right down
+        center.x-rel_width, center.y-rel_height, 0,  // left down
+        center.x-rel_width, center.y+rel_height, 0,  // left up
+    };
+
+    float texture_coords[] = {
+        1.0f, 1.0f,
+        1.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 1.0f,
+    };
+    unsigned int indices[] = {
+        0, 1, 2,
+        0, 2, 3
+    };
+
+    return create_object(vertices, 4, texture_coords, indices, 6,
+                         texture_filename, vertex_shader_filename, fragment_shader_filename);
+}
+
+
 void delete_object(Object *obj)
 {
     glDeleteVertexArrays(1, &obj->VAO);
@@ -257,6 +297,7 @@ void delete_object(Object *obj)
     glDeleteBuffers(1, &obj->TBO);
     glDeleteBuffers(1, &obj->IBO);
     glDeleteProgram(obj->shader);
+    free(obj);
 }
 
 
@@ -304,37 +345,19 @@ int main ()
         return -1;
     }
 
-    float vertices[] = {
-        0.3f, -0.75f, 0.0f,
-        0.3f, -0.9f , 0.0f,
-        -0.3f, -0.9f , 0.0f,
-        -0.3f, -0.75f, 0.0f,
-    };
+    Object *player = create_rectangle_object((Rectangle) {
+        .position = {0.0f, -0.8f, 0.0f},
+        .height = 0.15f,
+        .width = 0.3f,
+        },
+        "resources/player.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
 
-    float tex_coord[] = {
-        1.0f, 1.0f,
-        1.0f, 0.0f,
-        0.0f, 0.0f,
-        0.0f, 1.0f,
-    };
-
-    unsigned int indices[] = {
-        0, 1, 2,
-        0, 2, 3
-    };
-
-    Object *player = create_object(vertices, 4, tex_coord, indices, 6,
-                                   "resources/player.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
-
-    float vertices_enemy[] = {
-         0.2f, 0.9f, 0.0f,
-         0.2f, 0.76f , 0.0f,
-        -0.2f, 0.76f , 0.0f,
-        -0.2f, 0.9f, 0.0f,
-    };
-
-    Object *enemy = create_object(vertices_enemy, 4, tex_coord, indices, 6,
-                                   "resources/red.png", "resources/static_vertex.glsl", "resources/fragment.glsl");
+    Object *enemy = create_rectangle_object((Rectangle) {
+        .position = {0.0f, 0.8f, 0.0f},
+        .height = 0.16f,
+        .width = 0.2f,
+        },
+        "resources/red.png", "resources/static_vertex.glsl", "resources/fragment.glsl");
 
     glUseProgram(player->shader);
 
