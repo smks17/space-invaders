@@ -356,6 +356,74 @@ void move_object(Object *obj)
 }
 
 
+#define NUMBER_OF_RED_ENEMIES_IN_ROW 8
+#define RED_ENEMIES_SCALES 0.8f
+
+Object **create_red_enemies()
+{
+    Object **enemies = malloc(sizeof(Object));
+    const float STRIDE = 1.6f / NUMBER_OF_RED_ENEMIES_IN_ROW;
+    for(int i = 0; i < (int)(NUMBER_OF_RED_ENEMIES_IN_ROW); i++) {
+        float x_position = (i * STRIDE) - 1.0f + 0.3f;
+        enemies[i] = create_rectangle_object((Rectangle) {
+                .position = {x_position, 0.8f, 0.0f},
+                .height = 0.16f * RED_ENEMIES_SCALES,
+                .width = 0.2f * RED_ENEMIES_SCALES,
+            },
+            "resources/red.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
+        printf("INFO : A red enemy was created in position (%f, %f)\n", x_position, 0.8f);
+    }
+    return enemies;
+}
+
+
+#define NUMBER_OF_GREEN_ENEMIES_IN_ROW 8
+#define GREEN_ENEMIES_SCALES 0.8f
+
+Object **create_green_enemies()
+{
+    Object **enemies = malloc(sizeof(Object));
+    const float STRIDE = 1.6f / NUMBER_OF_GREEN_ENEMIES_IN_ROW;
+    for(size_t i = 0; i < (int)(NUMBER_OF_GREEN_ENEMIES_IN_ROW); i++) {
+        float x_position = (i * STRIDE) - 1.0f + 0.3f;
+        printf("%f\n", x_position);
+        enemies[i] = create_rectangle_object((Rectangle) {
+                .position = {x_position, 0.6f, 0.0f},
+                .height = 0.16f * RED_ENEMIES_SCALES,
+                .width = 0.2f * RED_ENEMIES_SCALES,
+            },
+            "resources/green.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
+        printf("INFO : A green enemy was created in position (%f, %f)\n", x_position, 0.6f);
+    }
+    return enemies;
+}
+
+
+#define ENEMY_SPEED 3.0f
+
+void move_enemies(Object **objects, const size_t number_of_enemies)
+{
+    float time = sin(glfwGetTime() * ENEMY_SPEED) * 0.2f;
+    for (size_t i = 0; i < number_of_enemies; i++) {
+        Object *obj = objects[i];
+        Matrix4 transform = IDENTITY_MATRIX;
+        translate(&transform, (Point){.x=time, .y=0, .z=0});
+        glUseProgram(obj->shader);
+        unsigned int transform_loc = glGetUniformLocation(obj->shader, "transform");
+        glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
+        draw_object(obj);
+    }
+}
+
+
+void delete_enemies(Object **objects, const size_t number_of_enemies)
+{
+    for(size_t i = 0; i < number_of_enemies; i++) {
+        delete_object(objects[i]);
+    }
+}
+
+
 int main ()
 {
     init_glfw();
@@ -381,12 +449,8 @@ int main ()
         },
         "resources/player.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
 
-    Object *enemy = create_rectangle_object((Rectangle) {
-        .position = {0.0f, 0.8f, 0.0f},
-        .height = 0.16f,
-        .width = 0.2f,
-        },
-        "resources/red.png", "resources/static_vertex.glsl", "resources/fragment.glsl");
+    Object **red_enemies = create_red_enemies();
+    Object **green_enemies = create_green_enemies();
 
     glUseProgram(player->shader);
 
@@ -398,15 +462,17 @@ int main ()
 
         move_object(player);
 
-        glUseProgram(enemy->shader);
-        draw_object(enemy);
+        move_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
+        move_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
     delete_object(player);
-    delete_object(enemy);
+    delete_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
+    delete_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
+
     glfwTerminate();
 
     printf("Finish Program!");
