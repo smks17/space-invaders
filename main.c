@@ -184,7 +184,7 @@ void translate(Matrix4* m, Point vector)
         memcpy(m->data, multiply_matrix4(m, &translation).data, sizeof(m->data));
 }
 
-#define SPEED 0.001f
+#define PLAYER_SPEED 0.001f
 
 typedef struct {
     unsigned int VAO;       // Vertex array
@@ -237,17 +237,20 @@ Object* create_object(float *vertices, size_t n_vertices, float *texture_coords,
     glEnableVertexAttribArray(1);
 
     //texture
-    glGenTextures(1, &obj->texture);
-    glBindTexture(GL_TEXTURE_2D, obj->texture);
+    if (texture_filename) {
+        glGenTextures(1, &obj->texture);
+        glBindTexture(GL_TEXTURE_2D, obj->texture);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-    load_image_and_bind_texture(texture_filename);
+        load_image_and_bind_texture(texture_filename);
 
-    glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     /* glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); */
     glBindVertexArray(0);
@@ -283,6 +286,7 @@ Object* create_rectangle_object(Rectangle rectangle, const char *texture_filenam
         0.0f, 0.0f,
         0.0f, 1.0f,
     };
+
     unsigned int indices[] = {
         0, 1, 2,
         0, 2, 3
@@ -319,6 +323,31 @@ void draw_object(Object *obj)
     glDrawElements(GL_TRIANGLES, (GLsizei)(obj->n_component), GL_UNSIGNED_INT, 0);
 }
 
+typedef struct {
+    Object *fires[1024];
+    int count;
+    double last_fire_time;  // store last fire to stop spaming fire
+} Fires;
+
+Fires fires = {0};
+
+#define FIRE_HEIGHT 0.1f
+#define FIRE_WIDTH  0.02f
+
+#define FIRE_SPAWN_DELAY  0.9f  // 0.9 second
+
+void fire_fire(Point init_position)
+{
+    fires.fires[fires.count++] = create_rectangle_object((Rectangle) {
+        .position = init_position,
+        .height = FIRE_HEIGHT,
+        .width = FIRE_WIDTH,
+        },
+        NULL, "resources/fire_vertex.glsl", "resources/fragment_no_texture.glsl");
+    fires.last_fire_time = glfwGetTime();
+    printf("INFO : Spawn a fire\n");
+}
+
 
 void check_object_moving(GLFWwindow* window, Object *obj)
 {
@@ -327,19 +356,30 @@ void check_object_moving(GLFWwindow* window, Object *obj)
     // }
     if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
         if (obj->rel_position.y + obj->initialize_position.y > (-1.0f + (obj->initialize_size.y / 2)))
-            obj->rel_position.y -= SPEED;
+            obj->rel_position.y -= PLAYER_SPEED;
     }
     else if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
         if (obj->rel_position.y + obj->initialize_position.y < (1.0f - (obj->initialize_size.y / 2)))
-            obj->rel_position.y += SPEED;
+            obj->rel_position.y += PLAYER_SPEED;
     }
     else if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
         if (obj->rel_position.x + obj->initialize_position.x < (1.0f - (obj->initialize_size.x / 2)))
-            obj->rel_position.x += SPEED;
+            obj->rel_position.x += PLAYER_SPEED;
     }
     else if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
         if (obj->rel_position.x + obj->initialize_position.x > (-1.0f + (obj->initialize_size.x / 2)))
-            obj->rel_position.x -= SPEED;
+            obj->rel_position.x -= PLAYER_SPEED;
+    }
+    else if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+        double time = glfwGetTime();
+        if (fires.last_fire_time + FIRE_SPAWN_DELAY < time){
+            Point position = (Point) {
+                .x = obj->initialize_position.x + obj->rel_position.x,
+                .y = obj->initialize_position.y + obj->rel_position.y+0.1f,
+                .z = obj->initialize_position.z + obj->rel_position.z
+            };
+            fire_fire(position);  // spawn based on player(obj) position
+        }
     }
 }
 
@@ -424,6 +464,28 @@ void delete_enemies(Object **objects, const size_t number_of_enemies)
 }
 
 
+#define FIRE_SPEED 0.002f
+
+void move_fires()
+{
+    for (size_t i = 0; i < fires.count; i++) {
+        Object *obj = fires.fires[i];
+        obj->rel_position = (Point){.x=0, .y=obj->rel_position.y+FIRE_SPEED, .z=0};
+        move_object(obj);
+        draw_object(obj);
+    }
+}
+
+
+void delete_fires()
+{
+    for(size_t i = 0; i < fires.count; i++) {
+        delete_object(fires.fires[i]);
+    }
+    fires.count = 0;
+}
+
+
 int main ()
 {
     init_glfw();
@@ -465,6 +527,8 @@ int main ()
         move_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
         move_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
 
+        move_fires();
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -472,6 +536,7 @@ int main ()
     delete_object(player);
     delete_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
     delete_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
+    delete_fires();
 
     glfwTerminate();
 
