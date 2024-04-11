@@ -11,6 +11,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+
+//==========Window==========//
 #define WINDOW_WIDTH  800
 #define WINDOW_HEIGHT 600
 #define WINDOW_TITLE  "space invaders"
@@ -22,13 +24,13 @@ void init_glfw()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    printf("INFO : glfw initilize!\n");
+    printf("INFO : GLFW initialize!\n");
 }
 
-GLFWwindow* create_window()
+GLFWwindow *create_window()
 {
-    GLFWwindow* window;
-    GLFWmonitor** monitors = {0};
+    GLFWwindow *window;
+    GLFWmonitor **monitors = {0};
     int count_monitors = 0;
     bool full_screen = false;
     if (full_screen) {
@@ -45,16 +47,19 @@ GLFWwindow* create_window()
         fprintf(stderr, "ERROR: Could not create window!\n");
         return NULL;
     }
-    printf("INFO : glfw window has been created!\n");
+    printf("INFO : GLFW window has been created!\n");
     glfwMakeContextCurrent(window);
     return window;
 }
 
+void frame_buffer_callback(GLFWwindow *window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+}
 
-void frame_buffer_callback(GLFWwindow* window, int width, int height) { glViewport(0, 0, width, height); }
 
-
-const char *read_entire_file(const char* filename)
+//==========Shader==========//
+const char *read_entire_file(const char *filename)
 {
     FILE *file;
     fopen_s(&file, filename, "r");
@@ -66,7 +71,7 @@ const char *read_entire_file(const char* filename)
     long length = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char* buffer = malloc((sizeof(char) * length) + 1);
+    char *buffer = malloc((sizeof(char) * length) + 1);
     if (buffer == NULL) {
         fprintf(stderr, "ERROR: Could not malloc memory for reading a file. Please buy more RAM!");
         return NULL;
@@ -78,9 +83,7 @@ const char *read_entire_file(const char* filename)
     return buffer;
 }
 
-
-unsigned int compile_shader(const char *vertex_filename, const char *fragment_filename)
-{
+unsigned int compile_shader(const char *vertex_filename, const char *fragment_filename) {
     int success;
     char msg[512];
     // vertex shader
@@ -90,8 +93,7 @@ unsigned int compile_shader(const char *vertex_filename, const char *fragment_fi
     glCompileShader(vertex_shader);
     // check for shader compile errors
     glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
+    if (!success) {
         glGetShaderInfoLog(vertex_shader, 512, NULL, msg);
         fprintf(stderr, "ERROR: Vertex shader compilation failed: %s\n", msg);
     }
@@ -102,8 +104,7 @@ unsigned int compile_shader(const char *vertex_filename, const char *fragment_fi
     glCompileShader(fragment_shader);
     // check for shader compile errors
     glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
+    if (!success) {
         glGetShaderInfoLog(fragment_shader, 512, NULL, msg);
         fprintf(stderr, "ERROR: Fragment shader compilation failed: %s\n", msg);
     }
@@ -125,27 +126,38 @@ unsigned int compile_shader(const char *vertex_filename, const char *fragment_fi
     return shader_program;
 }
 
-
-void load_image_and_bind_texture(const char * texture_filename)
+//==========Texture==========//
+void load_image_and_bind_texture(const char *texture_filename)
 {
     int width, height, n_channels;
     stbi_set_flip_vertically_on_load(true);
-    unsigned char * data = stbi_load(texture_filename, &width, &height, &n_channels, STBI_rgb_alpha);
-    if(data){
-        if (n_channels == 3)
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-        else if (n_channels == 4)
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    unsigned char *data = stbi_load(texture_filename, &width, &height, &n_channels, STBI_rgb_alpha);
+    if (data) {
+        GLenum texture_format = 0;
+        switch (n_channels) {
+            case 3: texture_format = GL_RGB; break;
+            case 4: texture_format = GL_RGBA; break;
+            default: fprintf(stderr, "ERROR: Invalid number of texture image channels");
+        }
+        glTexImage2D(GL_TEXTURE_2D,     // target
+                     0,                 // samples
+                     texture_format,            // internal format
+                     width, height,     // size
+                     0,                 // border
+                     texture_format,    // format
+                     GL_UNSIGNED_BYTE,  // type
+                     data               // pixels
+        );
         glGenerateMipmap(GL_TEXTURE_2D);
-        printf("INFO : texture %s is read!\n", texture_filename);
-    }
-    else {
-        fprintf(stderr, "ERROR! can not load image!\n");
+        printf("INFO : Texture %s is read!\n", texture_filename);
+    } else {
+        fprintf(stderr, "ERROR: Cannot load image!\n");
     }
     stbi_image_free(data);
 }
 
 
+//==========Linear Algebra==========//
 typedef struct {
         float data[16];
 } Matrix4;
@@ -162,20 +174,19 @@ static const Matrix4 IDENTITY_MATRIX = {{
         0, 0, 0, 1
 }};
 
-const Matrix4 multiply_matrix4(Matrix4* mat1, Matrix4* m2)
+const Matrix4 multiply_matrix4(Matrix4 *mat1, Matrix4 *m2)
 {
     Matrix4 out = IDENTITY_MATRIX;
     for (size_t row = 0, row_offset = row * 4; row < 4; ++row, row_offset = row * 4)
         for (size_t column = 0; column < 4; ++column)
-            out.data[row_offset + column] =
-                (mat1->data[row_offset + 0] * m2->data[column + 0]) +
+            out.data[row_offset + column] = (mat1->data[row_offset + 0] * m2->data[column + 0]) +
                 (mat1->data[row_offset + 1] * m2->data[column + 4]) +
                 (mat1->data[row_offset + 2] * m2->data[column + 8]) +
                 (mat1->data[row_offset + 3] * m2->data[column + 12]);
     return out;
 }
 
-void translate(Matrix4* m, Point vector)
+void translate(Matrix4 *m, Point vector)
 {
         Matrix4 translation = IDENTITY_MATRIX;
         translation.data[12] = vector.x;
@@ -184,8 +195,8 @@ void translate(Matrix4* m, Point vector)
         memcpy(m->data, multiply_matrix4(m, &translation).data, sizeof(m->data));
 }
 
-#define PLAYER_SPEED 0.001f
 
+//==========Object==========//
 typedef struct {
     unsigned int VAO;       // Vertex array
     unsigned int VBO, TBO;  // Vertices and Texture buffers
@@ -195,17 +206,16 @@ typedef struct {
     size_t n_component;  // number of component to draw
     Point initialize_position;
     Point initialize_size;
-    Point rel_position;  // relativ positions (-1,1)
+    Point rel_position;  // relative positions (-1,1)
 } Object;
 
-
-Object* create_object(float *vertices, size_t n_vertices, float *texture_coords, unsigned int *indices,
-                      size_t n_component, const char *texture_filename,
+Object *create_object(float *vertices, size_t n_vertices, float *texture_coords,
+                      unsigned int *indices, size_t n_component, const char *texture_filename,
                       const char *vertex_shader_filename, const char *fragment_shader_filename)
 {
     Object *obj = malloc(sizeof(Object));
     if (obj == NULL) {
-        fprintf(stderr, "ERROR: Could not malloc memory for a object. Please buy more RAM!");
+        fprintf(stderr, "ERROR: Cannot malloc memory for a object. Please buy more RAM!");
         return NULL;
     }
 
@@ -219,24 +229,25 @@ Object* create_object(float *vertices, size_t n_vertices, float *texture_coords,
 
     glBindVertexArray(obj->VAO);
     glBindBuffer(GL_ARRAY_BUFFER, obj->VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*n_vertices*3, vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * n_vertices * 3, vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, obj->TBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float)*n_vertices*2, texture_coords, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * n_vertices * 2, texture_coords, GL_STATIC_DRAW);
 
     obj->n_component = n_component;
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, obj->IBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int)*n_component, indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * n_component, indices,
+                 GL_STATIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, obj->VBO);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
 
     glBindBuffer(GL_ARRAY_BUFFER, obj->TBO);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(1);
 
-    //texture
+    // texture
     if (texture_filename) {
         glGenTextures(1, &obj->texture);
         glBindTexture(GL_TEXTURE_2D, obj->texture);
@@ -260,24 +271,23 @@ Object* create_object(float *vertices, size_t n_vertices, float *texture_coords,
     return obj;
 }
 
-
 typedef struct {
     Point position;  // center position (not edge position)
     float height, width;
 } Rectangle;
 
-
-Object* create_rectangle_object(Rectangle rectangle, const char *texture_filename,
-                      const char *vertex_shader_filename, const char *fragment_shader_filename)
+Object *create_rectangle_object(Rectangle rectangle, const char *texture_filename,
+                                const char *vertex_shader_filename,
+                                const char *fragment_shader_filename)
 {
     const Point center     = rectangle.position;
     const float rel_height = rectangle.height / 2;
-    const float rel_width  = rectangle.width  / 2;
+    const float rel_width  = rectangle.width / 2;
     float vertices[] = {
-        center.x+rel_width, center.y+rel_height, 0,  // right up
-        center.x+rel_width, center.y-rel_height, 0,  // right down
-        center.x-rel_width, center.y-rel_height, 0,  // left down
-        center.x-rel_width, center.y+rel_height, 0,  // left up
+        center.x + rel_width, center.y + rel_height, 0,  // right up
+        center.x + rel_width, center.y - rel_height, 0,  // right down
+        center.x - rel_width, center.y - rel_height, 0,  // left down
+        center.x - rel_width, center.y + rel_height, 0,  // left up
     };
 
     float texture_coords[] = {
@@ -292,15 +302,14 @@ Object* create_rectangle_object(Rectangle rectangle, const char *texture_filenam
         0, 2, 3
     };
 
-    Object *obj = create_object(vertices, 4, texture_coords, indices, 6,
-                                texture_filename, vertex_shader_filename, fragment_shader_filename);
+    Object *obj = create_object(vertices, 4, texture_coords, indices, 6, texture_filename,
+                                vertex_shader_filename, fragment_shader_filename);
     if (obj != NULL) {
         obj->initialize_position = center;
-        obj->initialize_size     = (Point){rectangle.width, rectangle.height, 0};
+        obj->initialize_size = (Point){rectangle.width, rectangle.height, 0};
     }
     return obj;
 }
-
 
 void delete_object(Object *obj)
 {
@@ -312,7 +321,6 @@ void delete_object(Object *obj)
     free(obj);
 }
 
-
 void draw_object(Object *obj)
 {
     // bind textures on corresponding texture units
@@ -322,67 +330,6 @@ void draw_object(Object *obj)
     glBindVertexArray(obj->VAO);
     glDrawElements(GL_TRIANGLES, (GLsizei)(obj->n_component), GL_UNSIGNED_INT, 0);
 }
-
-typedef struct {
-    Object *fires[1024];
-    int count;
-    double last_fire_time;  // store last fire to stop spaming fire
-} Fires;
-
-Fires fires = {0};
-
-#define FIRE_HEIGHT 0.1f
-#define FIRE_WIDTH  0.02f
-
-#define FIRE_SPAWN_DELAY  0.9f  // 0.9 second
-
-void fire_fire(Point init_position)
-{
-    fires.fires[fires.count++] = create_rectangle_object((Rectangle) {
-        .position = init_position,
-        .height = FIRE_HEIGHT,
-        .width = FIRE_WIDTH,
-        },
-        NULL, "resources/fire_vertex.glsl", "resources/fragment_no_texture.glsl");
-    fires.last_fire_time = glfwGetTime();
-    printf("INFO : Spawn a fire\n");
-}
-
-
-void check_object_moving(GLFWwindow* window, Object *obj)
-{
-    // if(glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
-    //     glfwSetWindowShouldClose(window, true);
-    // }
-    if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-        if (obj->rel_position.y + obj->initialize_position.y > (-1.0f + (obj->initialize_size.y / 2)))
-            obj->rel_position.y -= PLAYER_SPEED;
-    }
-    else if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-        if (obj->rel_position.y + obj->initialize_position.y < (1.0f - (obj->initialize_size.y / 2)))
-            obj->rel_position.y += PLAYER_SPEED;
-    }
-    else if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        if (obj->rel_position.x + obj->initialize_position.x < (1.0f - (obj->initialize_size.x / 2)))
-            obj->rel_position.x += PLAYER_SPEED;
-    }
-    else if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        if (obj->rel_position.x + obj->initialize_position.x > (-1.0f + (obj->initialize_size.x / 2)))
-            obj->rel_position.x -= PLAYER_SPEED;
-    }
-    else if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-        double time = glfwGetTime();
-        if (fires.last_fire_time + FIRE_SPAWN_DELAY < time){
-            Point position = (Point) {
-                .x = obj->initialize_position.x + obj->rel_position.x,
-                .y = obj->initialize_position.y + obj->rel_position.y+0.1f,
-                .z = obj->initialize_position.z + obj->rel_position.z
-            };
-            fire_fire(position);  // spawn based on player(obj) position
-        }
-    }
-}
-
 
 void move_object(Object *obj)
 {
@@ -396,6 +343,93 @@ void move_object(Object *obj)
 }
 
 
+//==========Fire==========//
+typedef struct {
+    Object *fires[1024];
+    int count;
+    double last_fire_time;  // store last fire to stop spaming fire
+} Fires;
+
+Fires fires = {0};
+
+#define FIRE_HEIGHT 0.1f
+#define FIRE_WIDTH  0.02f
+
+#define FIRE_SPAWN_DELAY 0.9f  // 0.9 second
+
+void fire_fire(Point init_position)
+{
+    fires.fires[fires.count++] = create_rectangle_object(
+        (Rectangle){
+            .position = init_position,
+            .height = FIRE_HEIGHT,
+            .width = FIRE_WIDTH,
+        },
+        NULL,
+        "resources/fire_vertex.glsl",
+        "resources/fragment_no_texture.glsl");
+    fires.last_fire_time = glfwGetTime();
+    printf("INFO : Spawn a fire\n");
+}
+
+#define FIRE_SPEED 0.002f
+
+void move_fires()
+{
+    for (size_t i = 0; i < fires.count; i++) {
+        Object *obj = fires.fires[i];
+        obj->rel_position = (Point){.x = 0, .y = obj->rel_position.y + FIRE_SPEED, .z = 0};
+        move_object(obj);
+        draw_object(obj);
+    }
+}
+
+void delete_fires()
+{
+    for (size_t i = 0; i < fires.count; i++) {
+        delete_object(fires.fires[i]);
+    }
+    fires.count = 0;
+}
+
+
+//==========Player Action==========//
+#define PLAYER_SPEED 0.001f
+
+void check_object_moving(GLFWwindow *window, Object *obj)
+{
+    // if(glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
+    //     glfwSetWindowShouldClose(window, true);
+    // }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        if (obj->rel_position.y + obj->initialize_position.y >
+            (-1.0f + (obj->initialize_size.y / 2)))
+            obj->rel_position.y -= PLAYER_SPEED;
+    } else if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        if (obj->rel_position.y + obj->initialize_position.y <
+            (1.0f - (obj->initialize_size.y / 2)))
+            obj->rel_position.y += PLAYER_SPEED;
+    } else if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        if (obj->rel_position.x + obj->initialize_position.x <
+            (1.0f - (obj->initialize_size.x / 2)))
+            obj->rel_position.x += PLAYER_SPEED;
+    } else if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (obj->rel_position.x + obj->initialize_position.x >
+            (-1.0f + (obj->initialize_size.x / 2)))
+            obj->rel_position.x -= PLAYER_SPEED;
+    } else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+        double time = glfwGetTime();
+        if (fires.last_fire_time + FIRE_SPAWN_DELAY < time) {
+            Point position = (Point){.x = obj->initialize_position.x + obj->rel_position.x,
+                                     .y = obj->initialize_position.y + obj->rel_position.y + 0.1f,
+                                     .z = obj->initialize_position.z + obj->rel_position.z};
+            fire_fire(position);  // spawn based on player(obj) position
+        }
+    }
+}
+
+
+//==========Enemies==========//
 #define NUMBER_OF_RED_ENEMIES_IN_ROW 8
 #define RED_ENEMIES_SCALES 0.8f
 
@@ -403,9 +437,10 @@ Object **create_red_enemies()
 {
     Object **enemies = malloc(sizeof(Object));
     const float STRIDE = 1.6f / NUMBER_OF_RED_ENEMIES_IN_ROW;
-    for(int i = 0; i < (int)(NUMBER_OF_RED_ENEMIES_IN_ROW); i++) {
+    for (int i = 0; i < (int)(NUMBER_OF_RED_ENEMIES_IN_ROW); i++) {
         float x_position = (i * STRIDE) - 1.0f + 0.3f;
-        enemies[i] = create_rectangle_object((Rectangle) {
+        enemies[i] = create_rectangle_object(
+            (Rectangle){
                 .position = {x_position, 0.8f, 0.0f},
                 .height = 0.16f * RED_ENEMIES_SCALES,
                 .width = 0.2f * RED_ENEMIES_SCALES,
@@ -416,7 +451,6 @@ Object **create_red_enemies()
     return enemies;
 }
 
-
 #define NUMBER_OF_GREEN_ENEMIES_IN_ROW 8
 #define GREEN_ENEMIES_SCALES 0.8f
 
@@ -424,10 +458,10 @@ Object **create_green_enemies()
 {
     Object **enemies = malloc(sizeof(Object));
     const float STRIDE = 1.6f / NUMBER_OF_GREEN_ENEMIES_IN_ROW;
-    for(size_t i = 0; i < (int)(NUMBER_OF_GREEN_ENEMIES_IN_ROW); i++) {
+    for (size_t i = 0; i < (int)(NUMBER_OF_GREEN_ENEMIES_IN_ROW); i++) {
         float x_position = (i * STRIDE) - 1.0f + 0.3f;
-        printf("%f\n", x_position);
-        enemies[i] = create_rectangle_object((Rectangle) {
+        enemies[i] = create_rectangle_object(
+            (Rectangle){
                 .position = {x_position, 0.6f, 0.0f},
                 .height = 0.16f * RED_ENEMIES_SCALES,
                 .width = 0.2f * RED_ENEMIES_SCALES,
@@ -438,16 +472,15 @@ Object **create_green_enemies()
     return enemies;
 }
 
-
-#define ENEMY_SPEED 3.0f
+#define ENEMY_SPEED 3.0
 
 void move_enemies(Object **objects, const size_t number_of_enemies)
 {
-    float time = sin(glfwGetTime() * ENEMY_SPEED) * 0.2f;
+    double time = sin(glfwGetTime() * ENEMY_SPEED) * 0.2;
     for (size_t i = 0; i < number_of_enemies; i++) {
         Object *obj = objects[i];
         Matrix4 transform = IDENTITY_MATRIX;
-        translate(&transform, (Point){.x=time, .y=0, .z=0});
+        translate(&transform, (Point){.x = (float)time, .y = 0, .z = 0});
         glUseProgram(obj->shader);
         unsigned int transform_loc = glGetUniformLocation(obj->shader, "transform");
         glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
@@ -455,47 +488,24 @@ void move_enemies(Object **objects, const size_t number_of_enemies)
     }
 }
 
-
 void delete_enemies(Object **objects, const size_t number_of_enemies)
 {
-    for(size_t i = 0; i < number_of_enemies; i++) {
+    for (size_t i = 0; i < number_of_enemies; i++) {
         delete_object(objects[i]);
     }
 }
 
 
-#define FIRE_SPEED 0.002f
-
-void move_fires()
-{
-    for (size_t i = 0; i < fires.count; i++) {
-        Object *obj = fires.fires[i];
-        obj->rel_position = (Point){.x=0, .y=obj->rel_position.y+FIRE_SPEED, .z=0};
-        move_object(obj);
-        draw_object(obj);
-    }
-}
-
-
-void delete_fires()
-{
-    for(size_t i = 0; i < fires.count; i++) {
-        delete_object(fires.fires[i]);
-    }
-    fires.count = 0;
-}
-
-
-int main ()
+int main()
 {
     init_glfw();
 
-    GLFWwindow* window = NULL;
+    GLFWwindow *window = NULL;
     window = create_window(window);
     if (!window) return -1;
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)){
-        fprintf(stderr, "Failed to initialize GLAD\n");
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        fprintf(stderr, "ERROR: Failed to initialize GLAD\n");
         return -1;
     }
 
@@ -504,12 +514,16 @@ int main ()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    Object *player = create_rectangle_object((Rectangle) {
-        .position = {0.0f, -0.8f, 0.0f},
-        .height = 0.15f,
-        .width = 0.3f,
+    Object *player = create_rectangle_object(
+        (Rectangle){
+            .position = {0.0f, -0.8f, 0.0f},
+            .height = 0.15f,
+            .width = 0.3f,
         },
-        "resources/player.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
+        "resources/player.png",
+        "resources/dynamic_vertex.glsl",
+        "resources/fragment.glsl"
+    );
 
     Object **red_enemies = create_red_enemies();
     Object **green_enemies = create_green_enemies();
@@ -540,6 +554,6 @@ int main ()
 
     glfwTerminate();
 
-    printf("Finish Program!");
+    printf("INFO : Finish Program!");
     return 0;
 }
