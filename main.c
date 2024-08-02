@@ -1,4 +1,5 @@
-﻿#include <math.h>
+#include <math.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +12,16 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+inline void pixels_clear(uint32_t *pixels, size_t size, uint32_t color)
+{
+    for (size_t i = 0; i < size; i++)
+        pixels[i] = color;
+}
 
 //==========Window==========//
-#define WINDOW_WIDTH  800
-#define WINDOW_HEIGHT 600
+#define WINDOW_WIDTH  512
+#define WINDOW_HEIGHT 256
 #define WINDOW_TITLE  "space invaders"
-
 
 void init_glfw()
 {
@@ -30,9 +35,9 @@ void init_glfw()
 GLFWwindow *create_window()
 {
     GLFWwindow *window;
-    GLFWmonitor **monitors = {0};
-    int count_monitors = 0;
-    bool full_screen = false;
+    GLFWmonitor **monitors = { 0 };
+    int count_monitors     = 0;
+    bool full_screen       = false;
     if (full_screen) {
         monitors = glfwGetMonitors(&count_monitors);
         if (!monitors) {
@@ -57,9 +62,8 @@ void frame_buffer_callback(GLFWwindow *window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-
 //==========Shader==========//
-const char *read_entire_file(const char *filename)
+char *read_entire_file(const char *filename)
 {
     FILE *file;
     fopen_s(&file, filename, "r");
@@ -71,24 +75,25 @@ const char *read_entire_file(const char *filename)
     long length = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char *buffer = malloc((sizeof(char) * length) + 1);
+    char *buffer = malloc(sizeof(char) * (length + 1));
+    memset(buffer, 0, sizeof(char) * (length + 1));
     if (buffer == NULL) {
         fprintf(stderr, "ERROR: Could not malloc memory for reading a file. Please buy more RAM!");
         return NULL;
     }
-    fread(buffer, sizeof(char), length, file);
-    buffer[length] = '\0';
+    size_t actual_size = fread(buffer, sizeof(char), length, file);
     fclose(file);
 
     return buffer;
 }
 
-unsigned int compile_shader(const char *vertex_filename, const char *fragment_filename) {
+unsigned int compile_shader(const char *vertex_filename, const char *fragment_filename)
+{
     int success;
     char msg[512];
     // vertex shader
     unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    const char *vertex_shader_source = read_entire_file(vertex_filename);
+    char *vertex_shader_source = read_entire_file(vertex_filename);
     glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
     glCompileShader(vertex_shader);
     // check for shader compile errors
@@ -99,7 +104,7 @@ unsigned int compile_shader(const char *vertex_filename, const char *fragment_fi
     }
     // fragment shader
     unsigned int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    const char *fragment_shader_source = read_entire_file(fragment_filename);
+    char *fragment_shader_source = read_entire_file(fragment_filename);
     glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
     glCompileShader(fragment_shader);
     // check for shader compile errors
@@ -126,434 +131,278 @@ unsigned int compile_shader(const char *vertex_filename, const char *fragment_fi
     return shader_program;
 }
 
-//==========Texture==========//
-void load_image_and_bind_texture(const char *texture_filename)
+//==========Sprite==========//
+typedef struct {
+    uint8_t *data;
+    uint32_t width, height;
+    size_t x;
+    size_t y;
+} Sprite;
+
+Sprite *create_new_sprite(uint32_t width, uint32_t height)
 {
-    int width, height, n_channels;
-    stbi_set_flip_vertically_on_load(true);
-    unsigned char *data = stbi_load(texture_filename, &width, &height, &n_channels, STBI_rgb_alpha);
-    if (data) {
-        GLenum texture_format = 0;
-        switch (n_channels) {
-            case 3: texture_format = GL_RGB; break;
-            case 4: texture_format = GL_RGBA; break;
-            default: fprintf(stderr, "ERROR: Invalid number of texture image channels");
-        }
-        glTexImage2D(GL_TEXTURE_2D,     // target
-                     0,                 // samples
-                     texture_format,            // internal format
-                     width, height,     // size
-                     0,                 // border
-                     texture_format,    // format
-                     GL_UNSIGNED_BYTE,  // type
-                     data               // pixels
-        );
-        glGenerateMipmap(GL_TEXTURE_2D);
-        printf("INFO : Texture %s is read!\n", texture_filename);
-    } else {
-        fprintf(stderr, "ERROR: Cannot load image!\n");
+    uint8_t *data = (uint8_t *)malloc(width * height * sizeof(uint8_t));
+    if (data == NULL) {
+        fprintf(stderr, "Error: Cannot malloc memmory for sprite. Please buy more RAM!\n");
+        return NULL;
     }
-    stbi_image_free(data);
+    Sprite *sprite = malloc(sizeof(Sprite));
+    *sprite        = (Sprite){ data, width, height };
+    return sprite;
 }
 
-
-//==========Linear Algebra==========//
-typedef struct {
-        float data[16];
-} Matrix4;
-
-typedef struct {
-    float x, y, z;
-} Point;
-
-
-static const Matrix4 IDENTITY_MATRIX = {{
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-}};
-
-const Matrix4 multiply_matrix4(Matrix4 *mat1, Matrix4 *m2)
+void free_sprite(Sprite *sprite)
 {
-    Matrix4 out = IDENTITY_MATRIX;
-    for (size_t row = 0, row_offset = row * 4; row < 4; ++row, row_offset = row * 4)
-        for (size_t column = 0; column < 4; ++column)
-            out.data[row_offset + column] = (mat1->data[row_offset + 0] * m2->data[column + 0]) +
-                (mat1->data[row_offset + 1] * m2->data[column + 4]) +
-                (mat1->data[row_offset + 2] * m2->data[column + 8]) +
-                (mat1->data[row_offset + 3] * m2->data[column + 12]);
-    return out;
+    free(sprite->data);
+    sprite->data = NULL;
 }
-
-void translate(Matrix4 *m, Point vector)
-{
-        Matrix4 translation = IDENTITY_MATRIX;
-        translation.data[12] = vector.x;
-        translation.data[13] = vector.y;
-        translation.data[14] = vector.z;
-        memcpy(m->data, multiply_matrix4(m, &translation).data, sizeof(m->data));
-}
-
 
 //==========Object==========//
 typedef struct {
-    unsigned int VAO;       // Vertex array
-    unsigned int VBO, TBO;  // Vertices and Texture buffers
-    unsigned int IBO;       // Indices buffer
-    unsigned int shader;
-    unsigned int texture;
-    size_t n_component;  // number of component to draw
-    Point initialize_position;
-    Point initialize_size;
-    Point rel_position;  // relative positions (-1,1)
+    Sprite *sprite;
+    size_t x, y;
+    size_t init_x, init_y;
 } Object;
 
-Object *create_object(float *vertices, size_t n_vertices, float *texture_coords,
-                      unsigned int *indices, size_t n_component, const char *texture_filename,
-                      const char *vertex_shader_filename, const char *fragment_shader_filename)
+#define pixels(col, row) pixels[((col) * (WINDOW_WIDTH)) + (row)]
+
+void draw_object(uint32_t *pixels, Object *obj, uint32_t color)
 {
-    Object *obj = malloc(sizeof(Object));
-    if (obj == NULL) {
-        fprintf(stderr, "ERROR: Cannot malloc memory for a object. Please buy more RAM!");
-        return NULL;
+    const size_t left_up_x = obj->x - (obj->sprite->width / 2);
+    const size_t left_up_y = obj->y - (obj->sprite->height / 2);
+    for (size_t ys = 0; ys < obj->sprite->height; ys++) {
+        for (size_t xs = 0; xs < obj->sprite->width; xs++) {
+            size_t col = (ys + left_up_y);
+            size_t row = xs + left_up_x;
+            if ((col < WINDOW_HEIGHT) & (row < WINDOW_WIDTH) & (obj->sprite->data[xs + ((obj->sprite->height - ys - 1) * (obj->sprite->width))]))
+                pixels(col, row) = color;
+        }
     }
-
-    // shader
-   obj->shader = compile_shader(vertex_shader_filename, fragment_shader_filename);
-
-    glGenVertexArrays(1, &obj->VAO);
-    glGenBuffers(1, &obj->VBO);
-    glGenBuffers(1, &obj->TBO);
-    glGenBuffers(1, &obj->IBO);
-
-    glBindVertexArray(obj->VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, obj->VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * n_vertices * 3, vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ARRAY_BUFFER, obj->TBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * n_vertices * 2, texture_coords, GL_STATIC_DRAW);
-
-    obj->n_component = n_component;
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, obj->IBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * n_component, indices,
-                 GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ARRAY_BUFFER, obj->VBO);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-
-    glBindBuffer(GL_ARRAY_BUFFER, obj->TBO);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(1);
-
-    // texture
-    if (texture_filename) {
-        glGenTextures(1, &obj->texture);
-        glBindTexture(GL_TEXTURE_2D, obj->texture);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-        load_image_and_bind_texture(texture_filename);
-
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    /* glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); */
-    glBindVertexArray(0);
-
-    obj->rel_position = (Point){0, 0, 0};
-
-    return obj;
-}
-
-typedef struct {
-    Point position;  // center position (not edge position)
-    float height, width;
-} Rectangle;
-
-Object *create_rectangle_object(Rectangle rectangle, const char *texture_filename,
-                                const char *vertex_shader_filename,
-                                const char *fragment_shader_filename)
-{
-    const Point center     = rectangle.position;
-    const float rel_height = rectangle.height / 2;
-    const float rel_width  = rectangle.width / 2;
-    float vertices[] = {
-        center.x + rel_width, center.y + rel_height, 0,  // right up
-        center.x + rel_width, center.y - rel_height, 0,  // right down
-        center.x - rel_width, center.y - rel_height, 0,  // left down
-        center.x - rel_width, center.y + rel_height, 0,  // left up
-    };
-
-    float texture_coords[] = {
-        1.0f, 1.0f,
-        1.0f, 0.0f,
-        0.0f, 0.0f,
-        0.0f, 1.0f,
-    };
-
-    unsigned int indices[] = {
-        0, 1, 2,
-        0, 2, 3
-    };
-
-    Object *obj = create_object(vertices, 4, texture_coords, indices, 6, texture_filename,
-                                vertex_shader_filename, fragment_shader_filename);
-    if (obj != NULL) {
-        obj->initialize_position = center;
-        obj->initialize_size = (Point){rectangle.width, rectangle.height, 0};
-    }
-    return obj;
 }
 
 void delete_object(Object *obj)
 {
-    glDeleteVertexArrays(1, &obj->VAO);
-    glDeleteBuffers(1, &obj->VBO);
-    glDeleteBuffers(1, &obj->TBO);
-    glDeleteBuffers(1, &obj->IBO);
-    glDeleteProgram(obj->shader);
+    if (obj->sprite->data)
+        free(obj->sprite->data);
+    free(obj->sprite);
     free(obj);
 }
 
-void draw_object(Object *obj)
+//==========Player==========//
+static Object PLAYER_OBJECT;
+
+void init_player_object()
 {
-    // bind textures on corresponding texture units
-    glActiveTexture(GL_TEXTURE);
-    glBindTexture(GL_TEXTURE_2D, obj->texture);
-
-    glBindVertexArray(obj->VAO);
-    glDrawElements(GL_TRIANGLES, (GLsizei)(obj->n_component), GL_UNSIGNED_INT, 0);
+    PLAYER_OBJECT.sprite = create_new_sprite(11, 7);
+    uint8_t temp[]       = {
+        0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, // .....@.....
+        0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, // ....@@@....
+        0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, // ....@@@....
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@@@@.
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@
+    };
+    memcpy_s(PLAYER_OBJECT.sprite->data, 11 * 7, temp, 11 * 7);
+    PLAYER_OBJECT.x = PLAYER_OBJECT.init_x = WINDOW_WIDTH / 2;
+    PLAYER_OBJECT.y = PLAYER_OBJECT.init_y = WINDOW_HEIGHT / 5;
 }
-
-void move_object(Object *obj)
-{
-    Matrix4 transform = IDENTITY_MATRIX;
-    translate(&transform, obj->rel_position);
-
-    glUseProgram(obj->shader);
-    unsigned int transform_loc = glGetUniformLocation(obj->shader, "transform");
-    glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
-    draw_object(obj);
-}
-
-
-//==========Fire==========//
-typedef struct {
-    Object *fires[1024];
-    int count;
-    double last_fire_time;  // store last fire to stop spaming fire
-} Fires;
-
-Fires fires = {0};
-
-#define FIRE_HEIGHT 0.1f
-#define FIRE_WIDTH  0.02f
-
-#define FIRE_SPAWN_DELAY 0.9f  // 0.9 second
-
-void fire_fire(Point init_position)
-{
-    fires.fires[fires.count++] = create_rectangle_object(
-        (Rectangle){
-            .position = init_position,
-            .height = FIRE_HEIGHT,
-            .width = FIRE_WIDTH,
-        },
-        NULL,
-        "resources/fire_vertex.glsl",
-        "resources/fragment_no_texture.glsl");
-    fires.last_fire_time = glfwGetTime();
-    printf("INFO : Spawn a fire\n");
-}
-
-#define FIRE_SPEED 0.002f
-
-void move_fires()
-{
-    for (size_t i = 0; i < fires.count; i++) {
-        Object *obj = fires.fires[i];
-        obj->rel_position = (Point){.x = 0, .y = obj->rel_position.y + FIRE_SPEED, .z = 0};
-        move_object(obj);
-        draw_object(obj);
-    }
-}
-
-void delete_fires()
-{
-    for (size_t i = 0; i < fires.count; i++) {
-        delete_object(fires.fires[i]);
-    }
-    fires.count = 0;
-}
-
 
 //==========Player Action==========//
-#define PLAYER_SPEED 0.001f
+#define PLAYER_SPEED 0.2f
 
-void check_object_moving(GLFWwindow *window, Object *obj)
+void check_player_moving(GLFWwindow *window, Object *obj)
 {
-    // if(glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
-    //     glfwSetWindowShouldClose(window, true);
-    // }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-        if (obj->rel_position.y + obj->initialize_position.y >
-            (-1.0f + (obj->initialize_size.y / 2)))
-            obj->rel_position.y -= PLAYER_SPEED;
-    } else if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-        if (obj->rel_position.y + obj->initialize_position.y <
-            (1.0f - (obj->initialize_size.y / 2)))
-            obj->rel_position.y += PLAYER_SPEED;
-    } else if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        if (obj->rel_position.x + obj->initialize_position.x <
-            (1.0f - (obj->initialize_size.x / 2)))
-            obj->rel_position.x += PLAYER_SPEED;
+    static float changes = 0;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        if (obj->x + PLAYER_SPEED < WINDOW_WIDTH) {
+            changes += PLAYER_SPEED;
+            if (changes >= 1) {
+                obj->x += (size_t)(changes);
+                changes -= 1;
+            }
+        }
     } else if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        if (obj->rel_position.x + obj->initialize_position.x >
-            (-1.0f + (obj->initialize_size.x / 2)))
-            obj->rel_position.x -= PLAYER_SPEED;
-    } else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-        double time = glfwGetTime();
-        if (fires.last_fire_time + FIRE_SPAWN_DELAY < time) {
-            Point position = (Point){.x = obj->initialize_position.x + obj->rel_position.x,
-                                     .y = obj->initialize_position.y + obj->rel_position.y + 0.1f,
-                                     .z = obj->initialize_position.z + obj->rel_position.z};
-            fire_fire(position);  // spawn based on player(obj) position
+        if (obj->x - PLAYER_SPEED >= 0) {
+            changes -= PLAYER_SPEED;
+            if (changes <= -1) {
+                obj->x += (size_t)(changes);
+                changes += 1;
+            }
         }
     }
 }
 
+//==========Enemy==========//
+#define ENEMY_SPEED 2
 
-//==========Enemies==========//
-#define NUMBER_OF_RED_ENEMIES_IN_ROW 8
-#define RED_ENEMIES_SCALES 0.8f
-
-Object **create_red_enemies()
+inline void moving_enemy_animation(Object *enemy, double curr_time)
 {
-    Object **enemies = malloc(sizeof(Object));
-    const float STRIDE = 1.6f / NUMBER_OF_RED_ENEMIES_IN_ROW;
-    for (int i = 0; i < (int)(NUMBER_OF_RED_ENEMIES_IN_ROW); i++) {
-        float x_position = (i * STRIDE) - 1.0f + 0.3f;
-        enemies[i] = create_rectangle_object(
-            (Rectangle){
-                .position = {x_position, 0.8f, 0.0f},
-                .height = 0.16f * RED_ENEMIES_SCALES,
-                .width = 0.2f * RED_ENEMIES_SCALES,
-            },
-            "resources/red.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
-        printf("INFO : A red enemy was created in position (%f, %f)\n", x_position, 0.8f);
-    }
-    return enemies;
+    enemy->x = enemy->init_x + (int)(sin(curr_time * ENEMY_SPEED) * (WINDOW_WIDTH / 16));
 }
 
 #define NUMBER_OF_GREEN_ENEMIES_IN_ROW 8
-#define GREEN_ENEMIES_SCALES 0.8f
 
 Object **create_green_enemies()
 {
-    Object **enemies = malloc(sizeof(Object));
-    const float STRIDE = 1.6f / NUMBER_OF_GREEN_ENEMIES_IN_ROW;
-    for (size_t i = 0; i < (int)(NUMBER_OF_GREEN_ENEMIES_IN_ROW); i++) {
-        float x_position = (i * STRIDE) - 1.0f + 0.3f;
-        enemies[i] = create_rectangle_object(
-            (Rectangle){
-                .position = {x_position, 0.6f, 0.0f},
-                .height = 0.16f * RED_ENEMIES_SCALES,
-                .width = 0.2f * RED_ENEMIES_SCALES,
-            },
-            "resources/green.png", "resources/dynamic_vertex.glsl", "resources/fragment.glsl");
-        printf("INFO : A green enemy was created in position (%f, %f)\n", x_position, 0.6f);
+    uint8_t temp[] = {
+        0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, // ..@......@..
+        0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, // ...@....@...
+        0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, // ..@@@@@@@@..
+        0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, // .@@.@@@@.@@.
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@@@@@
+        1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, // @.@@@@@@@@.@
+        1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, // @.@......@.@
+        0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0  // ...@@..@@...
+    };
+    Object **enemies = malloc(NUMBER_OF_GREEN_ENEMIES_IN_ROW * sizeof(Object));
+    if (!enemies) {
+        fprintf(stderr, "ERROR: Could not malloc memory for list of green enemies. Please buy more RAM!");
+        return NULL;
+    }
+    const size_t STRIDE = (WINDOW_WIDTH * 3 / 4) / NUMBER_OF_GREEN_ENEMIES_IN_ROW;
+    for (size_t i = 0; i < NUMBER_OF_GREEN_ENEMIES_IN_ROW; i++) {
+        enemies[i] = malloc(sizeof(Object));
+        if (!enemies[i]) {
+            fprintf(stderr, "ERROR: Could not malloc memory for a green enemy. Please buy more RAM!");
+            continue;
+        }
+        enemies[i]->sprite = create_new_sprite(12, 8);
+        memcpy_s(enemies[i]->sprite->data, 12 * 8, temp, 12 * 8);
+        enemies[i]->x = enemies[i]->init_x = (i * STRIDE) + (WINDOW_WIDTH / 8) + (STRIDE / 2);
+        enemies[i]->y = enemies[i]->init_y = WINDOW_HEIGHT * 8 / 10;
+        printf("INFO : A green enemy was created in position (%zu, %zu)\n", enemies[i]->x, enemies[i]->y);
     }
     return enemies;
 }
 
-#define ENEMY_SPEED 3.0
+#define NUMBER_OF_RED_ENEMIES_IN_ROW 8
 
-void move_enemies(Object **objects, const size_t number_of_enemies)
+Object **create_red_enemies()
 {
-    double time = sin(glfwGetTime() * ENEMY_SPEED) * 0.2;
-    for (size_t i = 0; i < number_of_enemies; i++) {
-        Object *obj = objects[i];
-        Matrix4 transform = IDENTITY_MATRIX;
-        translate(&transform, (Point){.x = (float)time, .y = 0, .z = 0});
-        glUseProgram(obj->shader);
-        unsigned int transform_loc = glGetUniformLocation(obj->shader, "transform");
-        glUniformMatrix4fv(transform_loc, 1, GL_FALSE, &(transform.data[0]));
-        draw_object(obj);
+    uint8_t temp[] = {
+        0, 0, 0, 1, 1, 0, 0, 0, // ...@@...
+        0, 0, 1, 1, 1, 1, 0, 0, // ..@@@@..
+        0, 1, 1, 1, 1, 1, 1, 0, // .@@@@@@.
+        1, 1, 0, 1, 1, 0, 1, 1, // @@.@@.@@
+        1, 1, 1, 1, 1, 1, 1, 1, // @@@@@@@@
+        0, 1, 0, 1, 1, 0, 1, 0, // .@.@@.@.
+        1, 0, 0, 0, 0, 0, 0, 1, // @......@
+        0, 1, 0, 0, 0, 0, 1, 0  // .@....@.
+    };
+    Object **enemies = malloc(NUMBER_OF_GREEN_ENEMIES_IN_ROW * sizeof(Object));
+    if (!enemies) {
+        fprintf(stderr, "ERROR: Could not malloc memory for list of red enemies. Please buy more RAM!");
+        return NULL;
     }
+    const size_t STRIDE = (WINDOW_WIDTH * 3 / 4) / NUMBER_OF_RED_ENEMIES_IN_ROW;
+    for (size_t i = 0; i < NUMBER_OF_RED_ENEMIES_IN_ROW; i++) {
+        enemies[i] = malloc(sizeof(Object));
+        if (!enemies[i]) {
+            fprintf(stderr, "ERROR: Could not malloc memory for a red enemy. Please buy more RAM!");
+            continue;
+        }
+        enemies[i]->sprite = create_new_sprite(8, 8);
+        memcpy_s(enemies[i]->sprite->data, 8 * 8, temp, 8 * 8);
+        enemies[i]->x = enemies[i]->init_x = (i * STRIDE) + (WINDOW_WIDTH / 8) + (STRIDE / 2);
+        enemies[i]->y = enemies[i]->init_y = WINDOW_HEIGHT * 7 / 10;
+        printf("INFO : A red enemy was created in position (%zu, %zu)\n", enemies[i]->x, enemies[i]->y);
+    }
+    return enemies;
 }
 
-void delete_enemies(Object **objects, const size_t number_of_enemies)
+void delete_enemies(Object **enemies, size_t number_of_enemies)
 {
-    for (size_t i = 0; i < number_of_enemies; i++) {
-        delete_object(objects[i]);
-    }
+    for (size_t i = 0; i < number_of_enemies; i++)
+        delete_object(enemies[i]);
+    free(enemies);
 }
 
-
+//==========Main==========//
 int main()
 {
     init_glfw();
-
-    GLFWwindow *window = NULL;
-    window = create_window(window);
-    if (!window) return -1;
+    GLFWwindow *window = create_window();
+    if (!window)
+        return -1;
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         fprintf(stderr, "ERROR: Failed to initialize GLAD\n");
         return -1;
     }
 
+    glClearColor(1, 0, 0, 1);
+
+    uint32_t *pixels = malloc(sizeof(uint32_t) * WINDOW_HEIGHT * WINDOW_WIDTH);
+    pixels_clear(pixels, WINDOW_HEIGHT * WINDOW_WIDTH, 0);
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, WINDOW_WIDTH, WINDOW_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    GLuint vao;
+    glGenVertexArrays(1, &vao);
+
+    uint32_t shader = compile_shader("resources/pixel_vertex.glsl", "resources/pixel_fragment.glsl");
+    glUseProgram(shader);
+
+    GLuint location = glGetUniformLocation(shader, "pixels");
+    glUniform1i(location, 0);
+
+    glDisable(GL_DEPTH_TEST);
+    glActiveTexture(GL_TEXTURE0);
+
+    glBindVertexArray(vao);
+
+    init_player_object();
+
+    Object **green_enemies = create_green_enemies();
+    Object **red_enemies   = create_red_enemies();
+
     glfwSetFramebufferSizeCallback(window, frame_buffer_callback);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    Object *player = create_rectangle_object(
-        (Rectangle){
-            .position = {0.0f, -0.8f, 0.0f},
-            .height = 0.15f,
-            .width = 0.3f,
-        },
-        "resources/player.png",
-        "resources/dynamic_vertex.glsl",
-        "resources/fragment.glsl"
-    );
-
-    Object **red_enemies = create_red_enemies();
-    Object **green_enemies = create_green_enemies();
-
-    glUseProgram(player->shader);
-
     while (!glfwWindowShouldClose(window)) {
-        check_object_moving(window, player);
+        pixels_clear(pixels, WINDOW_HEIGHT * WINDOW_WIDTH, 0x181818FF);
 
-        glClearColor(0.18f, 0.18f, 0.18f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        check_player_moving(window, &PLAYER_OBJECT);
+        draw_object(pixels, &PLAYER_OBJECT, 0xFFFFFFFF);
 
-        move_object(player);
+        double curr_time = glfwGetTime();
+        for (size_t i = 0; i < NUMBER_OF_GREEN_ENEMIES_IN_ROW; i++) {
+            moving_enemy_animation(green_enemies[i], curr_time);
+            draw_object(pixels, green_enemies[i], 0x31EDEEFF);
+        }
+        for (size_t i = 0; i < NUMBER_OF_RED_ENEMIES_IN_ROW; i++) {
+            moving_enemy_animation(red_enemies[i], curr_time);
+            draw_object(pixels, red_enemies[i], 0xEB1A40FF);
+        }
 
-        move_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
-        move_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
+        glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0, 0, 0,
+            WINDOW_WIDTH, WINDOW_HEIGHT,
+            GL_RGBA, GL_UNSIGNED_INT_8_8_8_8,
+            pixels);
 
-        move_fires();
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    delete_object(player);
-    delete_enemies(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
-    delete_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
-    delete_fires();
-
+    glfwDestroyWindow(window);
     glfwTerminate();
 
-    printf("INFO : Finish Program!");
+    glDeleteVertexArrays(1, &vao);
+
+    free(pixels);
+    free(PLAYER_OBJECT.sprite->data);
+    delete_enemies(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
+
     return 0;
 }

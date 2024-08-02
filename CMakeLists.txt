@@ -14,12 +14,6 @@ find_package(OpenGL REQUIRED)
 file(GLOB SOURCES main.c)
 file(GLOB HEADERS )
 
-if (MSVC)
-    add_compile_options(/W4 /WX)
-else()
-    add_compile_options(-Wall -Wextra)
-endif()
-
 add_executable(${PROJECT_NAME} ${HEADERS} ${SOURCES})
 
 set(GLFW_LIB_NAME glfw)
