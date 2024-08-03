@@ -209,26 +209,77 @@ void init_player_object()
 }
 
 //==========Player Action==========//
-#define PLAYER_SPEED 0.2f
+#define MAX_FIRES 20
+Object *player_fires[MAX_FIRES];
 
-void check_player_moving(GLFWwindow *window, Object *obj)
+void initialize_fires()
 {
-    static float changes = 0;
+    for (int i = 0; i < MAX_FIRES; i++)
+        player_fires[i] = NULL;
+}
+
+void moving_fires()
+{
+    for (int i = 0; i < MAX_FIRES; i++) {
+        if (player_fires[i] != NULL) {
+            player_fires[i]->y += 1;
+            if (player_fires[i]->y > WINDOW_WIDTH) {
+                free(player_fires[i]);
+                player_fires[i] = NULL;
+            }
+        }
+    }
+}
+
+void spawn_player_fire(Object *player, uint32_t *pixels)
+{
+    Object *fire          = malloc(sizeof(Object));
+    fire->sprite          = create_new_sprite(1, 3);
+    fire->sprite->data    = malloc(sizeof(uint8_t) * 2);
+    fire->sprite->data[0] = 1;
+    fire->sprite->data[1] = 1;
+    fire->sprite->data[2] = 1;
+    fire->sprite->x = fire->x = player->x;
+    fire->sprite->y = fire->y = player->y;
+    for (size_t i = 0; i < MAX_FIRES; i++) {
+        if (player_fires[i] == NULL) {
+            player_fires[i] = fire;
+            return;
+        }
+    }
+    fprintf(stderr, "ERROR: Could not spawn a new fire anymore\n");
+}
+
+#define PLAYER_SPEED          0.2f
+#define PLAYER_FIRE_RATE_TIME 0.2f
+
+void check_player_action(GLFWwindow *window, Object *player, uint32_t *pixels)
+{
+    static double last_spawn_fire = 0;
+    static float changes          = 0;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        if (obj->x + PLAYER_SPEED < WINDOW_WIDTH) {
+        if (player->x + PLAYER_SPEED < WINDOW_WIDTH) {
             changes += PLAYER_SPEED;
             if (changes >= 1) {
-                obj->x += (size_t)(changes);
+                player->x += (size_t)(changes);
                 changes -= 1;
             }
         }
-    } else if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        if (obj->x - PLAYER_SPEED >= 0) {
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (player->x - PLAYER_SPEED >= 0) {
             changes -= PLAYER_SPEED;
             if (changes <= -1) {
-                obj->x += (size_t)(changes);
+                player->x += (size_t)(changes);
                 changes += 1;
             }
+        }
+    }
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+        double curr_time = glfwGetTime();
+        if (curr_time - last_spawn_fire > PLAYER_FIRE_RATE_TIME) {
+            spawn_player_fire(player, pixels);
+            last_spawn_fire = curr_time;
         }
     }
 }
@@ -364,13 +415,20 @@ int main()
     Object **green_enemies = create_green_enemies();
     Object **red_enemies   = create_red_enemies();
 
+    initialize_fires();
+
     glfwSetFramebufferSizeCallback(window, frame_buffer_callback);
 
     while (!glfwWindowShouldClose(window)) {
         pixels_clear(pixels, WINDOW_HEIGHT * WINDOW_WIDTH, 0x181818FF);
 
-        check_player_moving(window, &PLAYER_OBJECT);
+        check_player_action(window, &PLAYER_OBJECT, pixels);
         draw_object(pixels, &PLAYER_OBJECT, 0xFFFFFFFF);
+
+        moving_fires();
+        for (size_t i = 0; i < MAX_FIRES; i++)
+            if (player_fires[i] != NULL)
+                draw_object(pixels, player_fires[i], 0xFFFFFFFF);
 
         double curr_time = glfwGetTime();
         for (size_t i = 0; i < NUMBER_OF_GREEN_ENEMIES_IN_ROW; i++) {
