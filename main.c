@@ -160,13 +160,14 @@ void free_sprite(Sprite *sprite)
 //==========Object==========//
 typedef struct {
     Sprite *sprite;
-    size_t x, y;
+    long double x, y;
     size_t init_x, init_y;
+    uint32_t color;
 } Object;
 
 #define pixels(col, row) pixels[((col) * (WINDOW_WIDTH)) + (row)]
 
-void draw_object(uint32_t *pixels, Object *obj, uint32_t color)
+void draw_object(uint32_t *pixels, Object *obj)
 {
     const size_t left_up_x = obj->x - (obj->sprite->width / 2);
     const size_t left_up_y = obj->y - (obj->sprite->height / 2);
@@ -175,7 +176,7 @@ void draw_object(uint32_t *pixels, Object *obj, uint32_t color)
             size_t col = (ys + left_up_y);
             size_t row = xs + left_up_x;
             if ((col < WINDOW_HEIGHT) & (row < WINDOW_WIDTH) & (obj->sprite->data[xs + ((obj->sprite->height - ys - 1) * (obj->sprite->width))]))
-                pixels(col, row) = color;
+                pixels(col, row) = obj->color;
         }
     }
 }
@@ -206,26 +207,45 @@ void init_player_object()
     memcpy_s(PLAYER_OBJECT.sprite->data, 11 * 7, temp, 11 * 7);
     PLAYER_OBJECT.x = PLAYER_OBJECT.init_x = WINDOW_WIDTH / 2;
     PLAYER_OBJECT.y = PLAYER_OBJECT.init_y = WINDOW_HEIGHT / 5;
+    PLAYER_OBJECT.color = 0xFFFFFFFF;
 }
 
 //==========Player Action==========//
-#define MAX_FIRES 20
-Object *player_fires[MAX_FIRES];
+#define MAX_PLAYER_FIRES 20
+Object *player_fires[MAX_PLAYER_FIRES];
+
+#define MAX_ENEMY_FIRES 50
+Object *enemy_fires[MAX_ENEMY_FIRES];
 
 void initialize_fires()
 {
-    for (int i = 0; i < MAX_FIRES; i++)
+    for (int i = 0; i < MAX_PLAYER_FIRES; i++)
         player_fires[i] = NULL;
+    for (int i = 0; i < MAX_ENEMY_FIRES; i++)
+        enemy_fires[i] = NULL;
 }
+
+
+#define PLAYER_FIRE_SPEED  0.5
+#define PLAYER_ENEMY_SPEED 0.2
 
 void moving_fires()
 {
-    for (int i = 0; i < MAX_FIRES; i++) {
+    for (int i = 0; i < MAX_PLAYER_FIRES; i++) {
         if (player_fires[i] != NULL) {
             player_fires[i]->y += 1;
-            if (player_fires[i]->y > WINDOW_WIDTH) {
+            if (player_fires[i]->y >= WINDOW_HEIGHT) {
                 free(player_fires[i]);
                 player_fires[i] = NULL;
+            }
+        }
+    }
+    for (int i = 0; i < MAX_ENEMY_FIRES; i++) {
+        if (enemy_fires[i] != NULL) {
+            enemy_fires[i]->y -= 0.2;
+            if (enemy_fires[i]->y <= 0) {
+                free(enemy_fires[i]);
+                enemy_fires[i] = NULL;
             }
         }
     }
@@ -241,7 +261,8 @@ void spawn_player_fire(Object *player, uint32_t *pixels)
     fire->sprite->data[2] = 1;
     fire->sprite->x = fire->x = player->x;
     fire->sprite->y = fire->y = player->y;
-    for (size_t i = 0; i < MAX_FIRES; i++) {
+    fire->color = player->color;
+    for (size_t i = 0; i < MAX_PLAYER_FIRES; i++) {
         if (player_fires[i] == NULL) {
             player_fires[i] = fire;
             return;
@@ -256,23 +277,14 @@ void spawn_player_fire(Object *player, uint32_t *pixels)
 void check_player_action(GLFWwindow *window, Object *player, uint32_t *pixels)
 {
     static double last_spawn_fire = 0;
-    static float changes          = 0;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
         if (player->x + PLAYER_SPEED < WINDOW_WIDTH) {
-            changes += PLAYER_SPEED;
-            if (changes >= 1) {
-                player->x += (size_t)(changes);
-                changes -= 1;
-            }
+            player->x += PLAYER_SPEED;
         }
     }
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
         if (player->x - PLAYER_SPEED >= 0) {
-            changes -= PLAYER_SPEED;
-            if (changes <= -1) {
-                player->x += (size_t)(changes);
-                changes += 1;
-            }
+            player->x -= PLAYER_SPEED;
         }
     }
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
@@ -285,6 +297,32 @@ void check_player_action(GLFWwindow *window, Object *player, uint32_t *pixels)
 }
 
 //==========Enemy==========//
+void check_to_spawn_enemy_fires(Object **enemies, size_t number_of_emmies)
+{
+    if ((rand() % 10000) == 0) {
+        Object *fire          = malloc(sizeof(Object));
+        fire->sprite          = create_new_sprite(1, 3);
+        fire->sprite->data    = malloc(sizeof(uint8_t) * 2);
+        fire->sprite->data[0] = 1;
+        fire->sprite->data[1] = 1;
+        fire->sprite->data[2] = 1;
+
+        int index = rand() % number_of_emmies;  // change to number of enemies that are alive
+        Object *enemy = enemies[index];
+
+        fire->sprite->x = fire->x = enemy->x;
+        fire->sprite->y = fire->y = enemy->y;
+        fire->color = enemy->color;
+        for (size_t i = 0; i < MAX_PLAYER_FIRES; i++) {
+            if (enemy_fires[i] == NULL) {
+                enemy_fires[i] = fire;
+                return;
+            }
+        }
+        fprintf(stderr, "ERROR: Could not spawn a new fire anymore\n");
+    }
+}
+
 #define ENEMY_SPEED 2
 
 inline void moving_enemy_animation(Object *enemy, double curr_time)
@@ -322,7 +360,8 @@ Object **create_green_enemies()
         memcpy_s(enemies[i]->sprite->data, 12 * 8, temp, 12 * 8);
         enemies[i]->x = enemies[i]->init_x = (i * STRIDE) + (WINDOW_WIDTH / 8) + (STRIDE / 2);
         enemies[i]->y = enemies[i]->init_y = WINDOW_HEIGHT * 8 / 10;
-        printf("INFO : A green enemy was created in position (%zu, %zu)\n", enemies[i]->x, enemies[i]->y);
+        enemies[i]->color = 0x31EDEEFF;
+        printf("INFO : A green enemy was created in position (%zu, %zu)\n", (size_t)enemies[i]->x, (size_t)enemies[i]->y);
     }
     return enemies;
 }
@@ -357,7 +396,8 @@ Object **create_red_enemies()
         memcpy_s(enemies[i]->sprite->data, 8 * 8, temp, 8 * 8);
         enemies[i]->x = enemies[i]->init_x = (i * STRIDE) + (WINDOW_WIDTH / 8) + (STRIDE / 2);
         enemies[i]->y = enemies[i]->init_y = WINDOW_HEIGHT * 7 / 10;
-        printf("INFO : A red enemy was created in position (%zu, %zu)\n", enemies[i]->x, enemies[i]->y);
+        enemies[i]->color = 0xEB1A40FF;
+        printf("INFO : A red enemy was created in position (%zu, %zu)\n", (size_t)enemies[i]->x, (size_t)enemies[i]->y);
     }
     return enemies;
 }
@@ -423,22 +463,27 @@ int main()
         pixels_clear(pixels, WINDOW_HEIGHT * WINDOW_WIDTH, 0x181818FF);
 
         check_player_action(window, &PLAYER_OBJECT, pixels);
-        draw_object(pixels, &PLAYER_OBJECT, 0xFFFFFFFF);
+        draw_object(pixels, &PLAYER_OBJECT);
 
         moving_fires();
-        for (size_t i = 0; i < MAX_FIRES; i++)
+        for (size_t i = 0; i < MAX_PLAYER_FIRES; i++)
             if (player_fires[i] != NULL)
-                draw_object(pixels, player_fires[i], 0xFFFFFFFF);
+                draw_object(pixels, player_fires[i]);
+        for (size_t i = 0; i < MAX_ENEMY_FIRES; i++)
+            if (enemy_fires[i] != NULL)
+                draw_object(pixels, enemy_fires[i]);
 
         double curr_time = glfwGetTime();
         for (size_t i = 0; i < NUMBER_OF_GREEN_ENEMIES_IN_ROW; i++) {
             moving_enemy_animation(green_enemies[i], curr_time);
-            draw_object(pixels, green_enemies[i], 0x31EDEEFF);
+            draw_object(pixels, green_enemies[i]);
         }
         for (size_t i = 0; i < NUMBER_OF_RED_ENEMIES_IN_ROW; i++) {
             moving_enemy_animation(red_enemies[i], curr_time);
-            draw_object(pixels, red_enemies[i], 0xEB1A40FF);
+            draw_object(pixels, red_enemies[i]);
         }
+        check_to_spawn_enemy_fires(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
+        check_to_spawn_enemy_fires(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
 
         glTexSubImage2D(
             GL_TEXTURE_2D,
