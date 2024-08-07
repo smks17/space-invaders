@@ -189,6 +189,30 @@ void delete_object(Object *obj)
     free(obj);
 }
 
+bool check_collision(Object *obj, Object **fires, size_t number_of_fires)
+{
+    size_t up_obj    = obj->y + (obj->sprite->height / 2);
+    size_t down_obj  = obj->y - (obj->sprite->height / 2);
+    size_t right_obj = obj->x + (obj->sprite->width / 2);
+    size_t left_obj  = obj->x - (obj->sprite->width / 2);
+    for (size_t i = 0; i < number_of_fires; i++) {
+        if (fires[i] == NULL)
+            continue;
+        size_t up_fire    = fires[i]->y + (fires[i]->sprite->height / 2);
+        size_t down_fire  = fires[i]->y - (fires[i]->sprite->height / 2);
+        size_t left_fire  = fires[i]->x - (fires[i]->sprite->width / 2);
+        size_t right_fire = fires[i]->x + (fires[i]->sprite->width / 2);
+
+        // TODO: also check sprite data
+        if (((up_fire < up_obj && up_fire > down_obj) || (down_fire < up_obj && down_fire > down_obj)) && ((left_fire > right_obj && left_fire < left_obj) || (right_fire < right_obj && right_fire > left_obj))) {
+            delete_object(fires[i]);
+            fires[i] = NULL;
+            return true;
+        }
+    }
+    return false;
+}
+
 //==========Player==========//
 static Object PLAYER_OBJECT;
 
@@ -225,15 +249,14 @@ void initialize_fires()
         enemy_fires[i] = NULL;
 }
 
-
-#define PLAYER_FIRE_SPEED  0.5
-#define PLAYER_ENEMY_SPEED 0.2
+#define PLAYER_FIRE_SPEED  0.3
+#define PLAYER_ENEMY_SPEED 0.1
 
 void moving_fires()
 {
     for (int i = 0; i < MAX_PLAYER_FIRES; i++) {
         if (player_fires[i] != NULL) {
-            player_fires[i]->y += 1;
+            player_fires[i]->y += PLAYER_FIRE_SPEED;
             if (player_fires[i]->y >= WINDOW_HEIGHT) {
                 free(player_fires[i]);
                 player_fires[i] = NULL;
@@ -242,7 +265,7 @@ void moving_fires()
     }
     for (int i = 0; i < MAX_ENEMY_FIRES; i++) {
         if (enemy_fires[i] != NULL) {
-            enemy_fires[i]->y -= 0.2;
+            enemy_fires[i]->y -= PLAYER_ENEMY_SPEED;
             if (enemy_fires[i]->y <= 0) {
                 free(enemy_fires[i]);
                 enemy_fires[i] = NULL;
@@ -255,7 +278,7 @@ void spawn_player_fire(Object *player, uint32_t *pixels)
 {
     Object *fire          = malloc(sizeof(Object));
     fire->sprite          = create_new_sprite(1, 3);
-    fire->sprite->data    = malloc(sizeof(uint8_t) * 2);
+    fire->sprite->data    = malloc(sizeof(uint8_t) * 3);
     fire->sprite->data[0] = 1;
     fire->sprite->data[1] = 1;
     fire->sprite->data[2] = 1;
@@ -272,20 +295,18 @@ void spawn_player_fire(Object *player, uint32_t *pixels)
 }
 
 #define PLAYER_SPEED          0.2f
-#define PLAYER_FIRE_RATE_TIME 0.2f
+#define PLAYER_FIRE_RATE_TIME 0.4f
 
 void check_player_action(GLFWwindow *window, Object *player, uint32_t *pixels)
 {
     static double last_spawn_fire = 0;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-        if (player->x + PLAYER_SPEED < WINDOW_WIDTH) {
+        if (player->x + PLAYER_SPEED < WINDOW_WIDTH)
             player->x += PLAYER_SPEED;
-        }
     }
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-        if (player->x - PLAYER_SPEED >= 0) {
+        if (player->x - PLAYER_SPEED >= 0)
             player->x -= PLAYER_SPEED;
-        }
     }
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
         double curr_time = glfwGetTime();
@@ -307,13 +328,21 @@ void check_to_spawn_enemy_fires(Object **enemies, size_t number_of_emmies)
         fire->sprite->data[1] = 1;
         fire->sprite->data[2] = 1;
 
-        int index = rand() % number_of_emmies;  // change to number of enemies that are alive
-        Object *enemy = enemies[index];
+        int index = 0;
+        int count = 0;
+        do {
+            index = rand() % number_of_emmies;
+            count++;
+        } while (enemies[index] == NULL || (count < (number_of_emmies * 2)));
 
+        if (enemies[index] == NULL)
+            return;
+
+        Object *enemy   = enemies[index];
         fire->sprite->x = fire->x = enemy->x;
         fire->sprite->y = fire->y = enemy->y;
-        fire->color = enemy->color;
-        for (size_t i = 0; i < MAX_PLAYER_FIRES; i++) {
+        fire->color     = enemy->color;
+        for (size_t i = 0; i < MAX_ENEMY_FIRES; i++) {
             if (enemy_fires[i] == NULL) {
                 enemy_fires[i] = fire;
                 return;
@@ -475,12 +504,26 @@ int main()
 
         double curr_time = glfwGetTime();
         for (size_t i = 0; i < NUMBER_OF_GREEN_ENEMIES_IN_ROW; i++) {
+            if (green_enemies[i] != NULL) {
             moving_enemy_animation(green_enemies[i], curr_time);
+                if (check_collision(green_enemies[i], player_fires, MAX_PLAYER_FIRES)) {
+                    delete_object(green_enemies[i]);
+                    green_enemies[i] = NULL;
+                    continue;
+                }
             draw_object(pixels, green_enemies[i]);
+            }
         }
         for (size_t i = 0; i < NUMBER_OF_RED_ENEMIES_IN_ROW; i++) {
+            if (red_enemies[i] != NULL) {
             moving_enemy_animation(red_enemies[i], curr_time);
+                if (check_collision(red_enemies[i], player_fires, MAX_PLAYER_FIRES)) {
+                    delete_object(red_enemies[i]);
+                    red_enemies[i] = NULL;
+                    continue;
+                }
             draw_object(pixels, red_enemies[i]);
+            }
         }
         check_to_spawn_enemy_fires(red_enemies, NUMBER_OF_RED_ENEMIES_IN_ROW);
         check_to_spawn_enemy_fires(green_enemies, NUMBER_OF_GREEN_ENEMIES_IN_ROW);
